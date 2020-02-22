@@ -61,6 +61,8 @@ class HuntMainActivity : AppCompatActivity() {
     private lateinit var viewModel: GeofenceViewModel
 
     // TODO: Step 2 add in variable to check if device is running Q or later
+    private val runningQOrLater =
+        android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q
 
     // A PendingIntent for the Broadcast Receiver that handles geofence transitions.
     // TODO: Step 8 add in a pending intent
@@ -126,7 +128,31 @@ class HuntMainActivity : AppCompatActivity() {
         permissions: Array<String>,
         grantResults: IntArray
     ) {
-        // TODO: Step 5 add code to handle the result of the user's permission
+        Log.d(TAG, "onRequestPermissionResult")
+
+        if (
+            grantResults.isEmpty() ||
+            grantResults[LOCATION_PERMISSION_INDEX] == PackageManager.PERMISSION_DENIED ||
+            (requestCode == REQUEST_FOREGROUND_AND_BACKGROUND_PERMISSION_RESULT_CODE &&
+                    grantResults[BACKGROUND_LOCATION_PERMISSION_INDEX] ==
+                    PackageManager.PERMISSION_DENIED))
+        {
+            // Permission denied.
+            Snackbar.make(
+                binding.activityMapsMain,
+                R.string.permission_denied_explanation, Snackbar.LENGTH_INDEFINITE
+            )
+                .setAction(R.string.settings) {
+                    // Displays App settings screen.
+                    startActivity(Intent().apply {
+                        action = Settings.ACTION_APPLICATION_DETAILS_SETTINGS
+                        data = Uri.fromParts("package", BuildConfig.APPLICATION_ID, null)
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                    })
+                }.show()
+        } else {
+            checkDeviceLocationSettingsAndStartGeofence()
+        }
     }
 
     /**
@@ -193,9 +219,20 @@ class HuntMainActivity : AppCompatActivity() {
      */
     @TargetApi(29)
     private fun foregroundAndBackgroundLocationPermissionApproved(): Boolean {
-        // TODO: Step 3 replace this with code to check that the foreground and background
-        //  permissions were approved
-        return false
+        val foregroundLocationApproved = (
+                PackageManager.PERMISSION_GRANTED ==
+                        ActivityCompat.checkSelfPermission(this,
+                            Manifest.permission.ACCESS_FINE_LOCATION))
+        val backgroundPermissionApproved =
+            if (runningQOrLater) {
+                PackageManager.PERMISSION_GRANTED ==
+                        ActivityCompat.checkSelfPermission(
+                            this, Manifest.permission.ACCESS_BACKGROUND_LOCATION
+                        )
+            } else {
+                true
+            }
+        return foregroundLocationApproved && backgroundPermissionApproved
     }
 
     /*
@@ -203,7 +240,28 @@ class HuntMainActivity : AppCompatActivity() {
      */
     @TargetApi(29 )
     private fun requestForegroundAndBackgroundLocationPermissions() {
-        // TODO: Step 4 add code to request foreground and background permissions
+        if (foregroundAndBackgroundLocationPermissionApproved())
+            return
+
+        // Else request the permission
+        // this provides the result[LOCATION_PERMISSION_INDEX]
+        var permissionsArray = arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
+
+        val resultCode = when {
+            runningQOrLater -> {
+                // this provides the result[BACKGROUND_LOCATION_PERMISSION_INDEX]
+                permissionsArray += Manifest.permission.ACCESS_BACKGROUND_LOCATION
+                REQUEST_FOREGROUND_AND_BACKGROUND_PERMISSION_RESULT_CODE
+            }
+            else -> REQUEST_FOREGROUND_ONLY_PERMISSIONS_REQUEST_CODE
+        }
+
+        Log.d(TAG, "Request foreground only location permission")
+        ActivityCompat.requestPermissions(
+            this@HuntMainActivity,
+            permissionsArray,
+            resultCode
+        )
     }
 
     /*
@@ -221,6 +279,8 @@ class HuntMainActivity : AppCompatActivity() {
             return
         }
         val currentGeofenceData = GeofencingConstants.LANDMARK_DATA[currentGeofenceIndex]
+
+        print("Added GeoFance for location: $currentGeofenceData")
 
         val geofence = Geofence.Builder()
             .setRequestId(currentGeofenceData.id)
@@ -279,7 +339,7 @@ class HuntMainActivity : AppCompatActivity() {
         }
     }
 
-    
+
     companion object {
         internal const val ACTION_GEOFENCE_EVENT =
             "HuntMainActivity.treasureHunt.action.ACTION_GEOFENCE_EVENT"
